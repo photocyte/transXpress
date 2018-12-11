@@ -8,7 +8,7 @@
 
 
 params.TRINITY_PARAMS += " --trimmomatic --quality_trimming_params \"ILLUMINACLIP:${workflow.projectDir}/adapters.fasta:3:30:10 SLIDINGWINDOW:4:20 LEADING:20 TRAILING:20 MINLEN:25\""
-params.tempdir = "/lab/weng_scratch/tmp/"
+params.tempDir = "/lab/weng_scratch/tmp/"
 
 theDate = new java.util.Date().format( 'MMdd' )
 
@@ -29,7 +29,6 @@ params.SIGNALP_ORGANISMS = "euk"
  */
 
 process trinityInchwormChrysalis {
-  echo = true
   label = "nf_"+assemblyPrefix+"_trinityInchwormChrysalis"
   stageInMode="copy" 
 
@@ -38,7 +37,7 @@ process trinityInchwormChrysalis {
 
   tag { assemblyPrefix }
 
-  afterScript 'echo \"(Above completion message is from Trinity. transXpress will continue the pipeline execution.)\"'
+  //afterScript 'ls -ltr > ../../trinityInchwormChrysalis.cwd.txt; ls -ltr ./trinity_out_dir >> ../../trinityInchwormChrysalis.cwd.txt' 
 
   input:
     file "samples.txt" from file(params.samples)
@@ -46,34 +45,79 @@ process trinityInchwormChrysalis {
   output:
     file "trinity_out_dir" into trinityWorkDir
     file "trinity_out_dir/recursive_trinity.cmds" into trinityCmds
-
+    file "trinity_out_dir/read_partitions/*/*/*.trinity.reads.fa" into parallelFasta
   script:
     """
     Trinity --no_distributed_trinity_exec --max_memory ${task.memory.toGiga()}G --CPU ${task.cpus} --samples_file ${"samples.txt"} ${params.TRINITY_PARAMS}
     """
 }
 
+parallelFasta
+    .flatten()
+    .map{ it ->
+        def parentPath = it.parent.toString()
+        name = it.name.toString()
+        parentPathRegexMatch = parentPath =~ /\/read_partitions\/Fb_[0-9]+\/CBin_[0-9]+/
+        parentPathRegexStr = parentPathRegexMatch[0]
+        key = "."+parentPathRegexStr+"/"+name
+        //println "fasta:"+key
+        return tuple(key, it)
+    }
+    .set{ parallelFastaKeyed }
+
+trinityCmds.splitText(by: 1, file: "trinityCmd").map{ it -> 
+    def nameRegexMatch = it.text.tokenize(" ")[2] =~ /\/read_partitions\/Fb_[0-9]+\/CBin_[0-9]+\/c[0-9]+\.trinity\.reads\.fa/
+    key = "."+nameRegexMatch[0]
+    return tuple(key,it)
+    }.set{ splitCmdsKeyed }
+
+process relativizeCommands {
+input:
+    set val(key),file(cmd) from splitCmdsKeyed
+
+output:
+    set val("${key}"),file("relative.${cmd}") into splitCmdsKeyedRel
+
+script:
+"""
+##Note the double backslash for Nextflow escaping
+cat ${cmd} | sed -r 's/[^"]+\\/read_partitions\\/Fb_[0-9]+\\/CBin_[0-9]+\\///g' > relative.${cmd}
+echo "##The key was:${key}" >> relative.${cmd}
+"""
+}
+
+splitCmdsKeyedRel.join(parallelFastaKeyed).set{ joinedGroups }
+
 process trinityButterflyParallel {
+  errorStrategy 'finish'
+  maxRetries 0
+
   input:
   //  file trinityWorkDir
-    file parallelCommand from trinityCmds.splitText(by: 10, file: "trinityCmd")
+    set val(pathKey),file(parallelCommand),file(inputFile) from joinedGroups //the join operator is the key thing here
   output:
     file "${parallelCommand}.completed" into trinityFinishedCmds
+    file "${pathKey}"+".out.Trinity.fasta" optional true into trinityFinishedFiles
   tag { assemblyPrefix+"-"+parallelCommand }
   script:
     """
+    mkdir -p ${pathKey}
     sh ${parallelCommand}
+    if [ -f "./*.out.Trinity.fasta" ]; then
+        mv ./*.out.Trinity.fasta ${pathKey}.out.Trinity.fasta
+    fi
     cp ${parallelCommand} ${parallelCommand}.completed
     """ 
 }
 
 process trinityFinish {
+   //beforeScript 'ls -ltr > ../../trinityFinish.cwd.txt; ls -ltr >> ../../trinityFinish.cwd.txt'
    publishDir "transXpress_results", mode: "copy", saveAs: { filename -> filename.replaceAll("trinity_out_dir/Trinity", "transcriptome") }
    cache 'lenient'
   input:
     file "samples.txt" from file(params.samples)
-    file trinityWorkDir
-    file finishedCommands from trinityFinishedCmds.collectFile(name: "recursive_trinity.cmds.completed",sort: true, tempdir:params.tempdir)
+    file finishedCommands from trinityFinishedCmds.collectFile(name: "recursive_trinity.cmds.completed",sort: true)
+    file allTheFiles from trinityFinishedFiles.collect()
   output:
     file "${trinityWorkDir}/Trinity.fasta.gene_trans_map" into originalGeneTransMap
     file "${trinityWorkDir}/Trinity.fasta" into Trinity_fasta_ch
@@ -170,7 +214,7 @@ process transrate {
   publishDir "transXpress_results", mode: "copy", saveAs: { filename -> "transrate_results.csv" }
   //Can't be implemented until the absolute vs relative path in samples.txt is figured out
   //Would be nice if there were an upstream module that pre-filtered all the read naming things.
-  //scratch params.scratch_dir
+  scratch params.scratch_dir
   cpus 8
   input:
     file "samples.txt" from file(params.samples)
@@ -284,8 +328,8 @@ process sprotBlastpParallel {
     blastp -query ${chunk} -db ${sprotDb} -num_threads ${task.cpus} -evalue 1e-6 -max_hsps 1 -max_target_seqs 1 -outfmt "6 std stitle" -out blastp_out
     """
 }
-sprotBlastxResults.collectFile(name: 'blastx_annotations.tsv',tempdir:params.tempdir).set { blastxResult }
-sprotBlastpResults.collectFile(name: 'blastp_annotations.tsv',tempdir:params.tempdir).into { blastpForTransdecoder; blastpResult }
+sprotBlastxResults.collectFile(name: 'blastx_annotations.tsv').set { blastxResult }
+sprotBlastpResults.collectFile(name: 'blastp_annotations.tsv').into { blastpForTransdecoder; blastpResult }
 
 process pfamParallel {
   cpus 2
@@ -302,8 +346,8 @@ process pfamParallel {
     hmmscan --cpu ${task.cpus} --domtblout pfam_dom_out --tblout pfam_out ${pfamDb} ${chunk}
     """
 }
-pfamResults.collectFile(name: 'pfam_annotations.txt',tempdir:params.tempdir).set { pfamResult }
-pfamDomResults.collectFile(name: 'pfam_dom_annotations.txt',tempdir:params.tempdir).into { pfamDomResult ; pfamForTransdecoder }
+pfamResults.collectFile(name: 'pfam_annotations.txt').set { pfamResult }
+pfamDomResults.collectFile(name: 'pfam_dom_annotations.txt').into { pfamDomResult ; pfamForTransdecoder }
 
 process rfamParallel {
   cpus 2
@@ -324,7 +368,7 @@ process rfamParallel {
 process publishRfamResults {
   publishDir "transXpress_results", mode: "copy"
   input:
-    file rfamResult from rfamResults.collectFile(name: 'rfam_annotations_unsorted.txt',tempdir:params.tempdir)
+    file rfamResult from rfamResults.collectFile(name: 'rfam_annotations_unsorted.txt')
   output:
     file "rfam_annotations.txt" into rfamResultPub
   script:
@@ -368,7 +412,7 @@ process signalpParallel {
     signalp -t ${params.SIGNALP_ORGANISMS} -f short ${chunk} > signalp_out
     """
 }
-signalpResults.collectFile(name: 'signalp_annotations.txt',tempdir:params.tempdir).set { signalpResult }
+signalpResults.collectFile(name: 'signalp_annotations.txt').set { signalpResult }
 
 process tmhmmParallel {
   cpus 1
@@ -383,7 +427,7 @@ process tmhmmParallel {
     tmhmm --short < ${chunk} > tmhmm_out
     """
 }
-tmhmmResults.collectFile(name: 'tmhmm_annotations.tsv',tempdir:params.tempdir).set { tmhmmResult }
+tmhmmResults.collectFile(name: 'tmhmm_annotations.tsv').set { tmhmmResult }
 
 // Collect parallelized annotations
 process annotatedFasta {
