@@ -270,8 +270,21 @@ process rfamParallel {
     cmscan --incE 0.00001 --rfam --cpu ${task.cpus} --tblout rfam_out ${rfamDb} ${chunk}
     """
 }
-rfamResults.collectFile(name: 'rfam_annotations.txt').set { rfamResult }
 //rfamDomResults.collectFile(name: 'rfam_dom_annotations.txt').set { rfamDomResult }
+
+process publishRfamResults {
+  publishDir "transXpress_results", mode: "copy"
+  input:
+    file rfamResult from rfamResults.collectFile(name: 'rfam_annotations_unsorted.txt')
+  output:
+    file "rfam_annotations.txt" into rfamResultPub
+  script:
+  """
+  cat ${rfamResult} | head -n 2 > header.txt
+  cat ${rfamResult} | tail -n 9 > footer.txt
+  cat header.txt ${rfamResult} footer.txt | grep -v "#" | sort -k3,3 -k15nr,15 | sort -u -k3,3 --merge | sort -k15nr,15 > rfam_annotations.txt
+  """
+}
 
 process transdecoderPredict {
   publishDir "transXpress_results", mode: "copy" // , saveAs: { filename -> "transcriptome_after_predict.pep" }
