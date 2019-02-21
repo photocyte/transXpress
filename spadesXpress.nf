@@ -54,6 +54,25 @@ java -jar /lab/solexa_weng/testtube/trinityrnaseq-Trinity-v2.8.4/trinity-plugins
 """
 }
 
+process convertSamplesToRelative {
+input:
+    file "samples.txt" from file(params.samples)
+output:
+    file "relative_samples.txt" into relative_samples_txt_ch
+
+script:
+"""
+while read LINE; do
+  START=\$(echo "\$LINE" | cut -f 1,2)
+  FORWARD=\$(echo "\$LINE" | cut -f 3 | sed -r 's/[\\/\\.].+\\///g')".R1-P.qtrim.fastq.gz"
+  REVERSE=\$(echo "\$LINE" | cut -f 4 | sed -r 's/[\\/\\.].+\\///g')".R2-P.qtrim.fastq.gz"
+  echo \$FORWARD \$REVERSE
+  echo "\${START}\t\${FORWARD}\t\${REVERSE}" >> relative_samples.txt
+done < samples.txt
+"""
+}
+relative_samples_txt_ch.into{ relative_samples_txt_ch1; relative_samples_txt_ch2; relative_samples_txt_ch3; relative_samples_txt_ch4}
+
 process convertReadsToYAML {
 
 input:
@@ -82,7 +101,6 @@ script:
    echo "]}]" >> datasets.yaml
 """  
 }
-
 
 process runSPAdes {
 executor 'lsf'
@@ -167,7 +185,7 @@ longOrfsProteomeSplit
 
 process downloadPfam {
   executor 'local'
-  storeDir 'db'
+  storeDir '/lab/solexa/weng/tmp/db'
   output:
     set file("Pfam-A.hmm"), file("Pfam-A.hmm.h??") into pfamDb
   script:
@@ -178,9 +196,22 @@ process downloadPfam {
     """
 }
 
+process downloadVirusesUniref50 {
+  executor 'local'
+  storeDir '/lab/solexa/weng/tmp/db'
+  errorStrategy 'ignore'
+  output:
+    set file("virusesUniref50.fasta"), file("virusesUniref50.pep.fasta.p??") into virusDb
+  script:
+    """
+    wget -t 3 -O virusesUniref50.pep.fasta.gz "https://www.uniprot.org/uniref/?query=uniprot%3A%28taxonomy%3A%22Viruses+%5B10239%5D%22%29+AND+identity%3A0.5&format=fasta&compress=yes"
+    makeblastdb -in virusesUniref50.pep.fasta -dbtype prot
+    """
+}
+
 process downloadRfam {
   executor 'local'
-  storeDir 'db'
+  storeDir '/lab/solexa/weng/tmp/db'
   output:
     set file("Rfam.cm"), file("Rfam.cm.???") into rfamDb
   script:
@@ -193,7 +224,7 @@ process downloadRfam {
 
 process downloadSprot {
   executor 'local'
-  storeDir 'db'
+  storeDir '/lab/solexa/weng/tmp/db'
   output:
     set file("uniprot_sprot.fasta"), file("uniprot_sprot.fasta.p??") into sprotDb
   script:
