@@ -64,6 +64,7 @@ output:
   file "datasets.yaml" into datasets_YAML_ch
 script:
 """
+   ##This is terrible hackery and I know it
    echo "[{
         orientation: "fr",
         type: "paired-end",
