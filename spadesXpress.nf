@@ -45,14 +45,26 @@ input:
 set file(R1_reads),file(R2_reads) from readPairs_ch
 
 output:
-  file "${R1_reads}.R1-P.qtrim.fastq.gz" into filteredForwardReads_ch1,filteredForwardReads_ch2,filteredForwardReads_ch5
-  file "${R2_reads}.R2-P.qtrim.fastq.gz" into filteredReverseReads_ch1,filteredReverseReads_ch2,filteredReverseReads_ch5
+  set file("${R1_reads}.R1-P.qtrim.fastq.gz"), file("${R2_reads}.R2-P.qtrim.fastq.gz") into filteredPairedReads_ch1,filteredPairedReads_ch2,filteredPairedReads_ch5
+  //file "${R1_reads}.R1-P.qtrim.fastq.gz" into filteredForwardReads_ch1,filteredForwardReads_ch2,filteredForwardReads_ch5
+  //file "${R2_reads}.R2-P.qtrim.fastq.gz" into filteredReverseReads_ch1,filteredReverseReads_ch2,filteredReverseReads_ch5
   file "*U.qtrim.fastq.gz" into filteredSingleReads_ch1,filteredSingleReads_ch2
 script:
 """
 java -jar /lab/solexa_weng/testtube/trinityrnaseq-Trinity-v2.8.4/trinity-plugins/Trimmomatic/trimmomatic.jar PE -threads ${task.cpus}  ${R1_reads} ${R2_reads} ${R1_reads}.R1-P.qtrim.fastq.gz ${R1_reads}.R1-U.qtrim.fastq.gz ${R2_reads}.R2-P.qtrim.fastq.gz ${R2_reads}.R2-U.qtrim.fastq.gz  ILLUMINACLIP:/lab/solexa_weng/testtube/trinityrnaseq-Trinity-v2.8.4/trinity-plugins/Trimmomatic/adapters/TruSeq3-PE.fa:2:30:10 SLIDINGWINDOW:4:5 LEADING:5 TRAILING:5 MINLEN:25 
 """
 }
+
+//Mix together all the filteredReads, and then group by their 
+//filteredPairedReads = Channel.create()
+//filteredPairedReads.mix(filteredForwardReads_ch5.collect(),filteredReverseReads_ch5.collect())
+//filteredPairedReads.map { file ->
+//        def key = file.name.toString().tokenize('_').get(0)
+//        println key
+//        return tuple(key, file)
+//     }
+//    .groupTuple()
+//    .set{ filteredPairedReadsGrouped_ch }
 
 process convertSamplesToRelative {
 input:
@@ -76,8 +88,9 @@ relative_samples_txt_ch.into{ relative_samples_txt_ch1; relative_samples_txt_ch2
 process convertReadsToYAML {
 
 input:
-  file forwardReads from filteredForwardReads_ch1.collect()
-  file reverseReads from filteredReverseReads_ch1.collect()
+  file pairedReads from filteredPairedReads_ch1.collect() //collect flattens the tuple structure
+  //file forwardReads from filteredForwardReads_ch1.collect()
+  //file reverseReads from filteredReverseReads_ch1.collect()
   file unpairedReads from filteredSingleReads_ch1.collect()
 output:
   file "datasets.yaml" into datasets_YAML_ch
@@ -110,8 +123,9 @@ memory "200 GB"
 
 input:
    file datasets_YAML from datasets_YAML_ch
-   file filteredForwardReads from filteredForwardReads_ch2.collect()
-   file filteredReverseReads from filteredReverseReads_ch2.collect()
+   file pairedReads from filteredPairedReads_ch2.collect() //collect flattens the tuple structure
+   //file filteredForwardReads from filteredForwardReads_ch2.collect()
+   //file filteredReverseReads from filteredReverseReads_ch2.collect()
    file filteredSingleReads from filteredSingleReads_ch2.collect()
 output:
    file assemblyPrefix+"/transcripts.fasta" into spadesAssembly_ch
@@ -185,7 +199,7 @@ longOrfsProteomeSplit
 
 process downloadPfam {
   executor 'local'
-  storeDir '/lab/solexa/weng/tmp/db'
+  storeDir '/lab/solexa_weng/tmp/db'
   output:
     set file("Pfam-A.hmm"), file("Pfam-A.hmm.h??") into pfamDb
   script:
@@ -198,7 +212,7 @@ process downloadPfam {
 
 process downloadVirusesUniref50 {
   executor 'local'
-  storeDir '/lab/solexa/weng/tmp/db'
+  storeDir '/lab/solexa_weng/tmp/db'
   errorStrategy 'ignore'
   output:
     set file("virusesUniref50.fasta"), file("virusesUniref50.pep.fasta.p??") into virusDb
@@ -211,7 +225,7 @@ process downloadVirusesUniref50 {
 
 process downloadRfam {
   executor 'local'
-  storeDir '/lab/solexa/weng/tmp/db'
+  storeDir '/lab/solexa_weng/tmp/db'
   output:
     set file("Rfam.cm"), file("Rfam.cm.???") into rfamDb
   script:
@@ -224,7 +238,7 @@ process downloadRfam {
 
 process downloadSprot {
   executor 'local'
-  storeDir '/lab/solexa/weng/tmp/db'
+  storeDir '/lab/solexa_weng/tmp/db'
   output:
     set file("uniprot_sprot.fasta"), file("uniprot_sprot.fasta.p??") into sprotDb
   script:
@@ -335,7 +349,7 @@ process transdecoderPredict {
 
 predictProteomeSplit
   .splitFasta(by: 100, file: true)
-  .into { signalpChunks; tmhmmChunks }
+  .into { signalpChunks; tmhmmChunks ; deeplocChunks}
 
 process signalpParallel {
   cpus 1
@@ -352,6 +366,21 @@ process signalpParallel {
 }
 signalpResults.collectFile(name: 'signalp_annotations.txt').set { signalpResult }
 
+
+process deeplocParallels {
+
+  input:
+    file chunk from deeplocChunks
+  output:
+    file "${chunk}.out} into deeplocResults
+  tag { assemblyPrefix+"-"+chunk }"
+  script:
+    """
+    deeploc -f ${chunk} -o ${chunk}.out
+    """
+}
+signalpResults.collectFile(name: 'deeploc_annotations.txt').set { deeplocResult }
+
 process tmhmmParallel {
   cpus 1
   input:
@@ -366,6 +395,31 @@ process tmhmmParallel {
     """
 }
 tmhmmResults.collectFile(name: 'tmhmm_annotations.tsv').set { tmhmmResult }
+
+process kallistoIndex {
+ input:
+  file transcriptFasta from transcriptomeKallisto
+ output:
+  file "*.kalidx" into kallistoIndex
+ tag {assemblyPrefix}
+ script:
+ """
+ kallisto index -i ${transcriptFasta}.kalidx ${transcriptFasta}
+ """
+}
+
+process kallistoDirect {
+ cpus 16
+ input:
+  file kallistoIndex
+  set file(forwardReads), file(reverseReads) from filteredPairedReads_ch5.collect()
+ output:
+  file "output*" into kallistoResults
+ script:
+ """
+ kallisto quant -t ${task.cpus} -i ${kallistoIndex} -o output -b 100 ${forwardReads} ${reverseReads}
+ """
+}
 
 
 // Collect parallelized annotations
