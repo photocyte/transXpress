@@ -134,7 +134,7 @@ process transdecoderLongOrfs {
     """
 }
 
-
+/*
 process transrate {
   publishDir "transXpress_results", mode: "copy", saveAs: { filename -> "transrate_results.csv" }
   cpus 8
@@ -157,6 +157,7 @@ process transrate {
     transrate --threads ${task.cpus} --assembly=${transcriptomeTransrate} --left=F_reads.fq.gz --right=R_reads.fq.gz
     """
 }
+*/
 
 transcriptomeSplit
   .splitFasta(by: 100, file: true)
@@ -183,12 +184,12 @@ process downloadRfam {
   executor 'local'
   storeDir 'db'
   output:
-    set file("Rfam_with_desc.cm"), file("Rfam_with_desc.cm.???") into rfamDb
+    set file("Rfam.cm"), file("Rfam.cm.???") into rfamDb
   script:
     """
-    wget "ftp://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/Rfam_with_desc.cm.gz"
-    gunzip Rfam_with_desc.cm.gz
-    cmpress Rfam_with_desc.cm
+    wget "ftp://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/Rfam.cm.gz"
+    gunzip Rfam.cm.gz
+    cmpress Rfam.cm
     """
 }
 
@@ -343,7 +344,7 @@ process annotatedFasta {
   input:
     file transcriptomeFile from transcriptomeAnnotation
     file proteomeFile from predictProteome
-    file transrateFile from transrateResults
+    //file transrateFile from transrateResults
     file blastxResult 
     file blastpResult
     file pfamResult 
@@ -377,13 +378,13 @@ process annotatedFasta {
     signalp_annotations = {}
 
     ## Load transrate results
-    print ("Loading transrate results from ${transrateFile}")
-    with open("${transrateFile}") as input_handle:
-      csv_reader = csv.reader(input_handle, delimiter=',')
-      columns = next(csv_reader)
-      for row in csv_reader:
-        if (len(row) < 18): continue
-        transrate_annotations[row[0]] = columns[5] + "=" + str(row[5]) + " " + columns[7] + "=" + str(row[7])
+    #Ungplugged transrate. Add a \$ back in front of the brackers if plugging back in ## print ("Loading transrate results from {transrateFile}")
+    ##Ungplugged transrate. Add a \$ back in front of the brackers if plugging back in #with open("{transrateFile}") as input_handle:
+    #  csv_reader = csv.reader(input_handle, delimiter=',')
+    #  columns = next(csv_reader)
+    #  for row in csv_reader:
+    #    if (len(row) < 18): continue
+    #    transrate_annotations[row[0]] = columns[5] + "=" + str(row[5]) + " " + columns[7] + "=" + str(row[7])
 
     ## Load blastx results
     print ("Loading blastx results from ${blastxResult}")
