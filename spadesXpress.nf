@@ -45,8 +45,8 @@ input:
 set file(R1_reads),file(R2_reads) from readPairs_ch
 
 output:
-  file "${R1_reads}.R1-P.qtrim.fastq.gz" into filteredForwardReads_ch1,filteredForwardReads_ch2
-  file "${R2_reads}.R2-P.qtrim.fastq.gz" into filteredReverseReads_ch1,filteredReverseReads_ch2
+  file "${R1_reads}.R1-P.qtrim.fastq.gz" into filteredForwardReads_ch1,filteredForwardReads_ch2,filteredForwardReads_ch5
+  file "${R2_reads}.R2-P.qtrim.fastq.gz" into filteredReverseReads_ch1,filteredReverseReads_ch2,filteredReverseReads_ch5
   file "*U.qtrim.fastq.gz" into filteredSingleReads_ch1,filteredSingleReads_ch2
 script:
 """
@@ -336,6 +336,7 @@ process tmhmmParallel {
 }
 tmhmmResults.collectFile(name: 'tmhmm_annotations.tsv').set { tmhmmResult }
 
+
 // Collect parallelized annotations
 process annotatedFasta {
   publishDir "transXpress_results", mode: "copy"
@@ -343,6 +344,7 @@ process annotatedFasta {
     file transcriptomeFile from transcriptomeAnnotation
     file proteomeFile from predictProteome
     //file transrateFile from transrateResults
+    //file kallistoFile from transcriptExpression
     file blastxResult 
     file blastpResult
     file pfamResult 
@@ -374,6 +376,17 @@ process annotatedFasta {
     pfam_annotations = {}
     tmhmm_annotations = {}
     signalp_annotations = {}
+
+    ## Load kallisto results
+    ##Unplugged transtrate, add a dollar sign in front of kallistoFile to plug back in
+    ##print ("Loading expression values from !{kallistoFile}")
+    ##with open("!{kallistoFile}") as input_handle:
+    ##  csv_reader = csv.reader(input_handle, delimiter='\t')
+    ##  columns = next(csv_reader)
+    ##  for row in csv_reader:
+    ##    expression_annotations[row[0]] = columns[1] + "=" + str(row[1])
+    ##    for i in range(2, len(columns)):
+    ##      expression_annotations[row[0]] += " " + columns[i] + "=" + str(row[i])
 
     ## Load transrate results
     #Ungplugged transrate. Add a \$ back in front of the brackers if plugging back in ## print ("Loading transrate results from {transrateFile}")
