@@ -29,17 +29,14 @@ params.SIGNALP_ORGANISMS = "euk"
  */
 
 feedback_ch = Channel.create()
-myFile = file('spades_samples.txt')
-allLines  = myFile.readLines()
-for( line in allLines ) {
-    splitline = line.split("\t")
-    println splitline
-    F_read = splitline[2]
-    R_read = splitline[3]
-    Channel.fromPath(F_read).set{ F_ch }
-    Channel.fromPath(R_read).set{ R_ch }
-    F_ch.combine(R_ch).set{ readPairs_ch }
-    }
+
+Channel.fromPath('spades_samples.txt')
+     .splitCsv(sep:'\t',header:false)
+     .map{ row ->
+     println row 
+     return tuple(file(row[2]), file(row[3])) }
+     .set{ readPairs_ch }
+
 
 process trimmomatic {
 

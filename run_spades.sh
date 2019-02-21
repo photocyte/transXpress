@@ -1,5 +1,6 @@
 #!/bin/bash
 
+export NXF_ANSI_LOG='false'
 GIT_DIR=$(dirname $(readlink -f ./transXpress.nf))"/.git"
 GIT_HASH=$(git --git-dir=${GIT_DIR} log --pretty=format:'%H' -n 1)
 echo "$(date)" | tee -a transXpress.stdout.log
